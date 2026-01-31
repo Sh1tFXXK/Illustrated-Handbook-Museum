@@ -1,14 +1,13 @@
-import { GoogleGenAI, Type } from "@google/genai";
 import { Category, Exhibit, Theme } from "../types";
 import { SUBCATEGORIES } from "../constants";
 
-const apiKey = process.env.API_KEY || '';
-const ai = new GoogleGenAI({ apiKey });
+// Use import.meta.env for Vite (VITE_ prefix required)
+const apiKey = import.meta.env.VITE_GEMINI_API_KEY || '';
 
 const MODEL_NAME = 'gemini-3-flash-preview';
 
 const SYSTEM_INSTRUCTION = `
-你是一个名为“图鉴博物馆”的 AI 策展人。你的任务是向访客介绍各种令人震撼的文化瑰宝。
+你是一个名为"图鉴博物馆"的 AI 策展人。你的任务是向访客介绍各种令人震撼的文化瑰宝。
 博物馆收集以下三大类别的藏品，每个类别下有特定的子分类：
 
 1. 书籍名句 (Literature)
@@ -21,7 +20,7 @@ const SYSTEM_INSTRUCTION = `
 
 3. 建筑 (Architecture)
    - 子分类: 博物馆, 住宅, 地标, 宗教
-   - 描述: 具有视觉冲击力或历史意义的建筑设计。**注意：博物馆现在属于建筑的一个子分类。**
+   - 描述: 具有视觉冲击力或历史意义的建筑设计。
 
 你的语气应该是博学、优雅且富有启发性的。请用中文回答。
 `;
@@ -41,13 +40,75 @@ const fetchMusicPreview = async (query: string): Promise<string | undefined> => 
   return undefined;
 };
 
+// Create a demo exhibit without AI
+const createDemoExhibit = (category: Category, theme?: Theme, subcategory?: string): Exhibit => {
+  const demoExhibits: Record<string, Exhibit> = {
+    literature: {
+      id: crypto.randomUUID(),
+      title: 'Demo: 书籍名句',
+      description: '这是一个演示藏品。请配置 Google Gemini API Key 以生成真实的 AI 藏品。',
+      details: 'Demo Author',
+      year: '2024',
+      category: Category.LITERATURE,
+      subcategory: '小说',
+      tags: ['演示', '示例'],
+      imageUrl: `https://picsum.photos/seed/demo-lit/600/800`
+    },
+    music: {
+      id: crypto.randomUUID(),
+      title: 'Demo: 音乐旋律',
+      description: '这是一个演示藏品。请配置 Google Gemini API Key 以生成真实的 AI 藏品。',
+      details: 'Demo Composer',
+      year: '2024',
+      category: Category.MUSIC,
+      subcategory: '古典',
+      tags: ['演示', '示例'],
+      imageUrl: `https://picsum.photos/seed/demo-music/600/800`
+    },
+    architecture: {
+      id: crypto.randomUUID(),
+      title: 'Demo: 建筑奇观',
+      description: '这是一个演示藏品。请配置 Google Gemini API Key 以生成真实的 AI 藏品。',
+      details: 'Demo Architect',
+      year: '2024',
+      category: Category.ARCHITECTURE,
+      subcategory: '博物馆',
+      tags: ['演示', '示例'],
+      imageUrl: `https://picsum.photos/seed/demo-arch/600/800`
+    }
+  };
+  
+  const catKey = category === Category.ALL ? 'literature' : category;
+  const exhibit = demoExhibits[catKey] || demoExhibits.literature;
+  
+  if (subcategory) {
+    exhibit.subcategory = subcategory;
+  }
+  if (theme) {
+    exhibit.tags = ['演示', '示例', theme.name];
+    exhibit.imageUrl = `https://picsum.photos/seed/demo-${theme.id}/600/800`;
+  }
+  
+  return exhibit;
+};
+
 export const generateExhibit = async (category: Category, theme?: Theme, subcategory?: string): Promise<Exhibit | null> => {
+  // Use demo exhibit if no API key
+  if (!apiKey) {
+    console.warn('No API key provided, using demo mode');
+    return createDemoExhibit(category, theme, subcategory);
+  }
+  
   try {
+    // Dynamic import to avoid SSR/build issues
+    const { GoogleGenAI, Type } = await import("@google/genai");
+    const ai = new GoogleGenAI({ apiKey });
+    
     const promptCategory = category === Category.ALL ? '任意一个类别(书籍、音乐、建筑)' : category;
     
     let subcategoryContext = '';
     if (subcategory) {
-      subcategoryContext = `请生成属于“${subcategory}”子分类的藏品。`;
+      subcategoryContext = `请生成属于"${subcategory}"子分类的藏品。`;
     } else if (category !== Category.ALL) {
        // Ask for a random subcategory from the list if not specified
        const validSubs = SUBCATEGORIES[category].join(', ');
@@ -55,12 +116,12 @@ export const generateExhibit = async (category: Category, theme?: Theme, subcate
     }
 
     const themeContext = theme && theme.id !== 'default' 
-      ? `请特别注意，本次策展的主题是“${theme.name}” (${theme.description})。生成的藏品必须紧扣这一主题。` 
+      ? `请特别注意，本次策展的主题是"${theme.name}" (${theme.description})。生成的藏品必须紧扣这一主题。` 
       : '';
 
     const response = await ai.models.generateContent({
       model: MODEL_NAME,
-      contents: `请生成一个关于“${promptCategory}”的详细藏品介绍。${subcategoryContext} ${themeContext}
+      contents: `请生成一个关于"${promptCategory}"的详细藏品介绍。${subcategoryContext} ${themeContext}
       我们需要一个令人震撼的例子。
       
       请严格按照以下 JSON 格式返回数据。确保不要包含 JSON 代码块标记，只返回 JSON 对象。
@@ -123,12 +184,22 @@ export const generateExhibit = async (category: Category, theme?: Theme, subcate
 
   } catch (error) {
     console.error("Failed to generate exhibit:", error);
-    return null;
+    // Fallback to demo on error
+    return createDemoExhibit(category, theme, subcategory);
   }
 };
 
 export const chatWithCurator = async (history: {role: string, parts: {text: string}[]}[], message: string) => {
+  // Return demo response if no API key
+  if (!apiKey) {
+    return '请配置 Google Gemini API Key 以启用 AI 策展人聊天功能。';
+  }
+  
   try {
+    // Dynamic import to avoid SSR/build issues
+    const { GoogleGenAI } = await import("@google/genai");
+    const ai = new GoogleGenAI({ apiKey });
+    
     const chat = ai.chats.create({
       model: MODEL_NAME,
       history: history,
@@ -141,6 +212,6 @@ export const chatWithCurator = async (history: {role: string, parts: {text: stri
     return result.text;
   } catch (error) {
     console.error("Chat error:", error);
-    throw error;
+    return '抱歉，我现在遇到了一些技术问题。请稍后再试。';
   }
 };
