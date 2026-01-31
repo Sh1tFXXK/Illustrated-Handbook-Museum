@@ -1,4 +1,4 @@
-><path>.github/workflows/deploy.yml</path><content>name: Deploy to GitHub Pages
+name: Deploy to GitHub Pages
 
 on:
   push:
@@ -7,7 +7,7 @@ on:
 
 permissions:
   contents: read
-  pages: write  
+  pages: write
   id-token: write
 
 concurrency:
